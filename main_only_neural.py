@@ -15,7 +15,7 @@ def main():
     # --- Experiment configuration
     # ------------------------------
     # Example timeline: from 1000 s to 1020 s, 10 fps
-    timeline = Timeline(1500, 2100, 10.0)
+    timeline = Timeline(1945, 1990, 10.0)
 
     expID = "2025-07-04_06_ESPM154"
     userID = "pmateosaparicio"
@@ -36,8 +36,8 @@ def main():
     # Neural imaging data
     video_cfg = {
         "user": "pmateosaparicio",
-        "expID": "2025-07-04_04_ESPM154",
-        "planes": [2], #,3,4,5],
+        "expID": "2025-07-07_05_ESPM154",
+        "planes": [2,3,4,5],
         "height": 512,
         "width": 512,
         "spatial_sigma": 1.0,
@@ -48,7 +48,7 @@ def main():
         "tile_layout": {
             "rows": 2,
             "cols": 2,
-            "order": [0], #,1,2,3],
+            "order": [0,1,2,3],
             "gap": 4
         },
     }
@@ -71,44 +71,21 @@ def main():
     oasis_time = oasis_data['t']
     oasis_traces = np.mean(oasis_data['oasis_spikes'],axis=0).T
 
-    plot_oasis = LinePlotSource(
+    plot_src1 = LinePlotSource(
         config={},
         time_vector=oasis_time,
         y_values=[oasis_traces],
         colors=["cyan", "magenta"],
         title="Population activity (spikes)",
         y_label="Signal (a.u.)",
-        time_window=(-5, 0),
+        time_window=(-5, 5),
         y_range_mode="global",
         interpolate=True,  # NEW
     )
      
 
-    # for line plot 2 - running speed
-    with open(os.path.join(exp_dir_processed_recordings,('s2p_oasis_ch' + str(Ch)+'.pickle')),'rb') as file: oasis_data = pickle.load(file)
-
-    wheel_data = pickle.load(open(os.path.join(exp_dir_processed_recordings,('wheel.pickle')), "rb"))
-
-    wheel_time = wheel_data['t']
-    wheel_trace = wheel_data['speed']
-
-    plot_wheel = LinePlotSource(
-        config={},
-        time_vector=wheel_time,
-        y_values=[wheel_trace],
-        colors=["cyan"],
-        title="Wheel speed",
-        y_label="Signal (a.u.)",
-        time_window=(-5, 5),
-        y_range_mode="global",
-        interpolate=True,  # NEW
-    )
-
     sources = {
-        "video0": video_src,
-        "stimulus": stim_src,
-        "plot_oasis": plot_oasis,
-        "plot_wheel": plot_wheel        
+        "video0": video_src
     }
 
     # ------------------------------
@@ -122,36 +99,10 @@ def main():
                 "source": "video0",
                 "x": 0,
                 "y": 0,
-                "w": 500,
-                "h": 500,
+                "w": 1000,
+                "h": 1000,
             },
 
-            # Stimulus presentation video (right)
-            "stimulus_video": {
-                "source": "stimulus",
-                "x": 500,
-                "y": 0,
-                "w": 500,
-                "h": 500,
-            },
-
-            # OASIS Line plot visualizer (bottom, spanning full width)
-            "line_plot_oasis": {
-                "source": "plot_oasis",  # name of your LinePlotSource instance
-                "x": 0,
-                "y": 500,               # positioned below the videos
-                "w": 500,              # span full width of both videos
-                "h": 500,               # height of the plot area
-            },
-
-            # WHEEL Line plot visualizer (bottom, spanning full width)
-            "line_plot_wheel": {
-                "source": "plot_wheel",  # name of your LinePlotSource instance
-                "x": 500,
-                "y": 500,               # positioned below the videos
-                "w": 500,              # span full width of both videos
-                "h": 500,               # height of the plot area
-            }          
         },
     }
 
