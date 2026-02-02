@@ -1,0 +1,41 @@
+{
+  "timeline": {
+    "start": 0.0,
+    "stop": 10.0,
+    "fps": 20.0
+  },
+  "canvas": {
+    "size": [
+      800,
+      1200
+    ],
+    "bg": 0
+  },
+  "sources": {
+    "1": {
+      "type": "EyeSource",
+      "params": {
+        "eye": "right",
+        "timestamps_file": "recordings/eye_frame_times.npy",
+        "crop": "False",
+        "plot_detected_pupil": true,
+        "plot_detected_eye": true,
+        "overlay_thickness": 2,
+        "contrast_clip_percentiles": [
+          0.0,
+          90.0
+        ]
+      }
+    }
+  },
+  "elements": {
+    "1": {
+      "source": "1",
+      "x": 0,
+      "y": 0,
+      "w": 200,
+      "h": 150,
+      "color": "#E76F51"
+    }
+  }
+}

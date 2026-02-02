@@ -21,7 +21,7 @@ def main():
     # --- Experiment configuration
     # ------------------------------
     # Example timeline: from 1000 s to 1020 s, 10 fps
-    timeline = Timeline(700, 938, 20.0)
+    timeline = Timeline(700, 710, 20.0)
     playback_multiplier = 1.5
 
     expID = "2025-07-04_04_ESPM154"

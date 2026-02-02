@@ -4,7 +4,7 @@ ensuring broad compatibility (VS Code, browsers, etc.).
 """
 
 import numpy as np
-import imageio.v3 as iio
+import imageio.v2 as iio
 
 class VideoWriter:
     """MP4 writer using libx264 and yuv420p pixel format."""
@@ -32,7 +32,7 @@ class VideoWriter:
         if not self.frames:
             raise RuntimeError("No frames written before close().")
         arr = np.stack(self.frames, axis=0).astype(np.uint8)
-        iio.imwrite(
+        iio.mimsave(
             self.out_path,
             arr,
             fps=self.fps,
