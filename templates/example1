@@ -1,7 +1,7 @@
 {
   "timeline": {
     "start": 0.0,
-    "stop": 20.0,
+    "stop": 10.0,
     "fps": 20.0
   },
   "canvas": {
@@ -40,9 +40,9 @@
           "gap": 4
         },
         "stack_isometric": true,
-        "stack_offset_pct": [
-          0.0,
-          -0.2
+        "stack_offset": [
+          0,
+          -100
         ],
         "stack_rot_x": 314.7,
         "stack_rot_y": 324.6,
@@ -55,11 +55,11 @@
   "elements": {
     "S2P_Binary_1": {
       "source": "S2P_Binary_1",
-      "x": 105,
-      "y": 212,
-      "w": 300,
-      "h": 300,
-      "color": "#E76F51"
+      "x": 0,
+      "y": 0,
+      "w": 200,
+      "h": 500,
+      "color": "#F4A261"
     }
   }
 }

@@ -47,6 +47,25 @@ class VideoBinSource(DataSource):
         self.concat_axis = c.get("concat_axis", "h")
         self.tile_layout = c.get("tile_layout", None)
         self.interpolate = bool(c.get("interpolate", True))
+        self.stack_isometric = bool(c.get("stack_isometric", False))
+        so = c.get("stack_offset", (12, -12))
+        if isinstance(so, (list, tuple)) and len(so) == 2:
+            self.stack_offset = (int(so[0]), int(so[1]))
+        else:
+            self.stack_offset = (12, -12)
+        sop = c.get("stack_offset_pct", None)
+        if isinstance(sop, (list, tuple)) and len(sop) == 2:
+            self.stack_offset_pct = (float(sop[0]), float(sop[1]))
+        else:
+            self.stack_offset_pct = None
+        self.stack_iso_shear = float(c.get("stack_iso_shear", 0.6))
+        self.stack_iso_scale_y = float(c.get("stack_iso_scale_y", 0.6))
+        self.stack_rot_x = float(c.get("stack_rot_x", 314.7))
+        self.stack_rot_y = float(c.get("stack_rot_y", 324.6))
+        self.stack_rot_z = float(c.get("stack_rot_z", 60.2))
+        self.stack_depth = float(c.get("stack_depth", 10.0))
+        self.stack_border = bool(c.get("stack_border", False))
+        self.stack_border_thickness = int(c.get("stack_border_thickness", 2))
 
         # Filtering control
         self.filter_opts = {
@@ -262,6 +281,91 @@ class VideoBinSource(DataSource):
         return (1 - alpha) * f1 + alpha * f2
 
     # ---------------------------------------------------------------
+    def _stack_planes_isometric(self, plane_imgs: List[np.ndarray]) -> np.ndarray:
+        if not plane_imgs:
+            return np.zeros((1, 1), dtype=np.uint8)
+
+        order = list(range(len(plane_imgs)))
+        try:
+            order = sorted(order, key=lambda i: self.planes[i], reverse=True)
+        except Exception:
+            order = order[::-1]
+
+        h, w = plane_imgs[0].shape[:2]
+        if self.stack_offset_pct is not None:
+            dx = float(self.stack_offset_pct[0]) * float(w)
+            dy = -float(self.stack_offset_pct[1]) * float(w)
+        else:
+            dx, dy = self.stack_offset
+
+        rx = np.deg2rad(self.stack_rot_x)
+        ry = np.deg2rad(self.stack_rot_y)
+        rz = np.deg2rad(self.stack_rot_z)
+        cx = (w - 1) / 2.0
+        cy = (h - 1) / 2.0
+
+        Rx = np.array([[1, 0, 0],
+                       [0, np.cos(rx), -np.sin(rx)],
+                       [0, np.sin(rx),  np.cos(rx)]], dtype=np.float32)
+        Ry = np.array([[ np.cos(ry), 0, np.sin(ry)],
+                       [0, 1, 0],
+                       [-np.sin(ry), 0, np.cos(ry)]], dtype=np.float32)
+        Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
+                       [np.sin(rz),  np.cos(rz), 0],
+                       [0, 0, 1]], dtype=np.float32)
+        R = Rz @ Ry @ Rx
+
+        base_corners = np.array([
+            [-cx, -cy, 0],
+            [ w-1-cx, -cy, 0],
+            [ w-1-cx,  h-1-cy, 0],
+            [-cx,  h-1-cy, 0],
+        ], dtype=np.float32)
+        projected = (R @ base_corners.T).T[:, :2]
+        min_xy = projected.min(axis=0)
+        max_xy = projected.max(axis=0)
+        out_w = int(np.ceil(max_xy[0] - min_xy[0])) + 2
+        out_h = int(np.ceil(max_xy[1] - min_xy[1])) + 2
+
+        src_pts = np.array([[0, 0], [w-1, 0], [0, h-1]], dtype=np.float32)
+        dst_pts = (projected[[0, 1, 3]] - min_xy + 1.0).astype(np.float32)
+        H = cv2.getAffineTransform(src_pts, dst_pts)
+
+        iso_imgs = []
+        iso_masks = []
+        for plane_idx in order:
+            img = plane_imgs[plane_idx]
+            if self.stack_border:
+                cv2.rectangle(img, (0, 0), (img.shape[1] - 1, img.shape[0] - 1), 255, self.stack_border_thickness)
+            iso = cv2.warpAffine(img, H, (out_w, out_h), flags=cv2.INTER_LINEAR, borderValue=0)
+            mask_src = np.ones((h, w), dtype=np.uint8) * 255
+            mask = cv2.warpAffine(mask_src, H, (out_w, out_h), flags=cv2.INTER_NEAREST, borderValue=0)
+            iso_imgs.append(iso)
+            iso_masks.append(mask)
+
+        offsets = [(i * dx, i * dy) for i in range(len(iso_imgs))]
+        xs = [o[0] for o in offsets]
+        ys = [o[1] for o in offsets]
+        min_x, min_y = min(xs), min(ys)
+        max_x = max(xs) + out_w
+        max_y = max(ys) + out_h
+        shift_x = -min_x if min_x < 0 else 0
+        shift_y = -min_y if min_y < 0 else 0
+        canvas_w = int(np.ceil(max_x + shift_x))
+        canvas_h = int(np.ceil(max_y + shift_y))
+        canvas = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
+
+        for idx, iso in enumerate(iso_imgs):
+            ox, oy = offsets[idx]
+            x = int(round(ox + shift_x))
+            y = int(round(oy + shift_y))
+            roi = canvas[y:y + out_h, x:x + out_w]
+            mask = iso_masks[idx] > 0
+            roi[mask] = iso[mask]
+
+        return canvas
+
+    # ---------------------------------------------------------------
     def draw_frame(self, t: float) -> np.ndarray:
         if not self.mm_list:
             raise RuntimeError("VideoBinSource not initialized.")
@@ -279,7 +383,10 @@ class VideoBinSource(DataSource):
             img = np.clip((f - self.vmin[pi]) / (self.vmax[pi] - self.vmin[pi]) * 255, 0, 255).astype(np.uint8)
             frames_8u.append(img)
 
-        img_all = self._tile_planes(frames_8u)
+        if self.stack_isometric:
+            img_all = self._stack_planes_isometric(frames_8u)
+        else:
+            img_all = self._tile_planes(frames_8u)
         img_all = cv2.cvtColor(img_all, cv2.COLOR_GRAY2BGR)
 
         if self.label:

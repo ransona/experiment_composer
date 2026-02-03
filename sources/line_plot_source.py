@@ -76,6 +76,13 @@ class LinePlotSource(DataSource):
             "axes.labelsize": 9,
         })
 
+        # persistent figure for matplotlib backend
+        self._fig = None
+        self._ax = None
+        self._lines = []
+        self._vline = None
+        self._buf = BytesIO()
+
     def initialize(self):
         pass
 
@@ -131,48 +138,57 @@ class LinePlotSource(DataSource):
             t_plot = t_seg
             y_interp = y_seg
 
-        # Create plot
-        fig, ax = plt.subplots(figsize=self.figure_size, dpi=self.dpi)
-        fig.patch.set_facecolor(self.bg_color)
-        ax.set_facecolor(self.bg_color)
-
-        for yi, color in zip(y_interp, self.colors):
-            ax.plot(t_plot, yi, color=color, lw=self.line_width)
-
-        # Vertical line for current time
-        ax.axvline(t, color="white" if self.bg_color == "black" else "gray",
-                   lw=0.8, ls="--", alpha=0.6)
+        # Create plot once, update thereafter
+        if self._fig is None or self._ax is None:
+            self._fig, self._ax = plt.subplots(figsize=self.figure_size, dpi=self.dpi)
+            self._fig.patch.set_facecolor(self.bg_color)
+            self._ax.set_facecolor(self.bg_color)
+            self._lines = []
+            for yi, color in zip(y_interp, self.colors):
+                (ln,) = self._ax.plot(t_plot, yi, color=color, lw=self.line_width)
+                self._lines.append(ln)
+            self._vline = self._ax.axvline(
+                t, color="white" if self.bg_color == "black" else "gray",
+                lw=0.8, ls="--", alpha=0.6
+            )
+            self._ax.xaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+        else:
+            for ln, yi, color in zip(self._lines, y_interp, self.colors):
+                ln.set_data(t_plot, yi)
+                ln.set_color(color)
+                ln.set_linewidth(self.line_width)
+            if self._vline is not None:
+                self._vline.set_xdata([t, t])
 
         # Fixed axis ranges and ticks (no jitter)
-        ax.set_xlim(t_start, t_end)
-        ax.set_ylim(ymin, ymax)
-        ax.set_xticks(np.linspace(t_start, t_end, 5))
-        ax.xaxis.set_major_formatter(plt.FormatStrFormatter("%.1f"))
+        self._ax.set_xlim(t_start, t_end)
+        self._ax.set_ylim(ymin, ymax)
+        self._ax.set_xticks(np.linspace(t_start, t_end, 5))
 
-        ax.tick_params(axis="x", colors=self.font_color)
-        ax.tick_params(axis="y", colors=self.font_color)
+        self._ax.tick_params(axis="x", colors=self.font_color)
+        self._ax.tick_params(axis="y", colors=self.font_color)
         if not self.show_y_axis:
-            ax.yaxis.set_visible(False)
+            self._ax.yaxis.set_visible(False)
         if self.y_label:
-            ax.set_ylabel(self.y_label, color=self.font_color)
+            self._ax.set_ylabel(self.y_label, color=self.font_color)
         if self.title:
-            ax.set_title(self.title, color=self.font_color, pad=8)
+            self._ax.set_title(self.title, color=self.font_color, pad=8)
         if self.grid:
-            ax.grid(True, color="gray", alpha=0.3, lw=0.5)
+            self._ax.grid(True, color="gray", alpha=0.3, lw=0.5)
 
         # Save without cropping — keeps dimensions constant
-        buf = BytesIO()
-        plt.savefig(
-            buf,
+        self._buf.seek(0)
+        self._buf.truncate(0)
+        self._fig.savefig(
+            self._buf,
             format="png",
-            facecolor=fig.get_facecolor(),
-            bbox_inches=None,  # <- important: no jitter
+            facecolor=self._fig.get_facecolor(),
+            bbox_inches=None,
             pad_inches=0,
         )
-        plt.close(fig)
-        buf.seek(0)
+        self._buf.seek(0)
 
-        img = Image.open(buf).convert("RGB")
+        img = Image.open(self._buf).convert("RGB")
         out = np.array(img, dtype=np.uint8)
         if profile and t0 is not None:
             dt_ms = (time.perf_counter() - t0) * 1000.0

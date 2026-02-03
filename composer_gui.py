@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import getpass
+import sys
 from typing import Any, Dict, List, Optional
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -16,6 +17,8 @@ from sources.reconstruction_video_source import ReconstructionVideoSource
 from sources.eye_source import EyeSource
 from sources.wheel_speed_source import WheelSpeedSource
 from sources.neural_trace_source import NeuralTraceSource
+from sources.numpy_trace_source import NumpyTraceSource
+from sources.sleep_score_source import SleepScoreSource
 
 
 PALETTE = [
@@ -42,6 +45,13 @@ SOURCE_DEFS = {
             ("enable_temporal_filter", "bool", True),
             ("interpolate", "bool", True),
             ("tile_layout", "dict", {"rows": 2, "cols": 2, "order": [0, 1, 2, 3], "gap": 4}),
+            ("stack_isometric", "bool", False),
+            ("stack_offset_pct", "tuple[float]", [0.0, 0.2], "dx,dy as % of plane width; negative dy moves up"),
+            ("stack_rot_x", "float", 314.7, "X rotation degrees"),
+            ("stack_rot_y", "float", 324.6, "Y rotation degrees"),
+            ("stack_rot_z", "float", 60.2, "Z rotation degrees"),
+            ("stack_border", "bool", False),
+            ("stack_border_thickness", "int", 2),
         ],
     },
     "StimulusVideoSource": {
@@ -53,9 +63,8 @@ SOURCE_DEFS = {
     },
     "ReconstructionVideoSource": {
         "params": [
-            ("subdir", "str", "reconstruction"),
-            ("video_file", "str", "session_recons_cut.mp4"),
-            ("timestamps_file", "str", "video_timeline.npy"),
+            ("video_path", "str", "reconstruction/session_recons_cut.mp4", "Relative to exp processed dir"),
+            ("timestamps_path", "str", "reconstruction/video_timeline.npy", "Relative to exp processed dir"),
             ("enable_temporal_filter", "bool", True),
             ("temporal_window", "int", 3),
             ("enable_spatial_filter", "bool", True),
@@ -67,7 +76,7 @@ SOURCE_DEFS = {
     },
     "EyeSource": {
         "params": [
-            ("eye", "str", "right"),
+            ("eye", "str", "right", "left|right"),
             ("timestamps_file", "str", os.path.join("recordings", "eye_frame_times.npy")),
             ("crop", "crop", "False"),
             ("plot_detected_pupil", "bool", True),
@@ -79,7 +88,7 @@ SOURCE_DEFS = {
     "WheelSpeedSource": {
         "params": [
             ("time_window", "tuple[float]", [-5.0, 5.0]),
-            ("y_range_mode", "str", "global"),
+            ("y_range_mode", "str", "global", "global|local|fixed"),
             ("fixed_y_range", "tuple[float]", []),
             ("y_label", "str", ""),
             ("title", "str", "Run speed"),
@@ -97,10 +106,10 @@ SOURCE_DEFS = {
     "NeuralTraceSource": {
         "params": [
             ("channel", "int", 0),
-            ("signal_key", "str", "Spikes"),
+            ("signal_key", "str", "Spikes", "Spikes|dF|F"),
             ("neuron_indices", "list[int]", []),
             ("time_window", "tuple[float]", [-5.0, 0.0]),
-            ("y_range_mode", "str", "global"),
+            ("y_range_mode", "str", "global", "global|local|fixed"),
             ("fixed_y_range", "tuple[float]", []),
             ("y_label", "str", ""),
             ("title", "str", "Mean population activity"),
@@ -115,7 +124,51 @@ SOURCE_DEFS = {
             ("colors", "list[str]", ["cyan", "magenta"]),
         ],
     },
+    "NumpyTraceSource": {
+        "params": [
+            ("path", "str", "", "Relative to exp processed dir"),
+            ("key", "str", "", "For .npz: array name to load (blank = first)"),
+            ("columns", "list[int]", []),
+            ("time_window", "tuple[float]", [-5.0, 0.0]),
+            ("y_range_mode", "str", "global", "global|local|fixed"),
+            ("fixed_y_range", "tuple[float]", []),
+            ("y_label", "str", ""),
+            ("title", "str", "Numpy trace"),
+            ("show_y_axis", "bool", True),
+            ("line_width", "float", 1.5),
+            ("figure_size", "tuple[int]", [4, 2]),
+            ("dpi", "int", 100),
+            ("bg_color", "str", "black"),
+            ("grid", "bool", False),
+            ("font_color", "str", "white"),
+            ("interpolate", "bool", True),
+            ("colors", "list[str]", ["cyan"]),
+        ],
+    },
+    "SleepScoreSource": {
+        "params": [
+            ("time_window", "tuple[float]", [-5.0, 5.0]),
+            ("colors", "list[str]", [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]]),
+            ("labels", "list[str]", ["AW", "QW", "NREM", "REM"]),
+            ("line_width", "float", 3.0),
+            ("figure_size", "tuple[int]", [4, 2]),
+            ("dpi", "int", 100),
+            ("bg_color", "str", "black"),
+            ("font_color", "str", "white"),
+            ("show_y_axis", "bool", True),
+        ],
+    },
 }
+
+
+def _iter_params(params_list):
+    for item in params_list:
+        if len(item) == 3:
+            key, ftype, default = item
+            hint = None
+        else:
+            key, ftype, default, hint = item
+        yield key, ftype, default, hint
 
 
 def _list_home_users() -> List[str]:
@@ -231,8 +284,8 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Experiment Composer")
         self.resize(1500, 950)
 
-        self.canvas_w = 500
-        self.canvas_h = 500
+        self.canvas_w = 512
+        self.canvas_h = 512
         self.bg = 0
 
         self.sources: Dict[str, Dict[str, Any]] = {}
@@ -242,6 +295,8 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self.template_path = None
         self._composer = None
         self._timeline = None
+        self._tmux_base_dir = "/data/common/composer/temp_tmux"
+        self._system_user = getpass.getuser()
 
         self._color_index = 0
         self._item_map: Dict[str, QtWidgets.QGraphicsRectItem] = {}
@@ -325,6 +380,10 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self.delete_source_btn.clicked.connect(self._delete_source)
         left_layout.addWidget(self.delete_source_btn)
 
+        self.rename_source_btn = QtWidgets.QPushButton("Rename Source")
+        self.rename_source_btn.clicked.connect(self._rename_source)
+        left_layout.addWidget(self.rename_source_btn)
+
         # Params
         self.params_group = QtWidgets.QGroupBox("Source Params")
         self.params_form = QtWidgets.QFormLayout(self.params_group)
@@ -341,6 +400,10 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self.y_edit = QtWidgets.QLineEdit()
         self.w_edit = QtWidgets.QLineEdit()
         self.h_edit = QtWidgets.QLineEdit()
+        self.x_edit.editingFinished.connect(self._apply_layout)
+        self.y_edit.editingFinished.connect(self._apply_layout)
+        self.w_edit.editingFinished.connect(self._apply_layout)
+        self.h_edit.editingFinished.connect(self._apply_layout)
         layout_form.addRow("X", self.x_edit)
         layout_form.addRow("Y", self.y_edit)
         layout_form.addRow("W", self.w_edit)
@@ -354,26 +417,32 @@ class ComposerWindow(QtWidgets.QMainWindow):
         template_group = QtWidgets.QGroupBox("Template")
         template_layout = QtWidgets.QVBoxLayout(template_group)
         template_btn_row = QtWidgets.QHBoxLayout()
-        self.save_template_btn = QtWidgets.QPushButton("Save")
         self.load_template_btn = QtWidgets.QPushButton("Load")
+        self.save_template_btn = QtWidgets.QPushButton("Save")
         self.save_template_btn.clicked.connect(self._save_template)
         self.load_template_btn.clicked.connect(self._load_template)
-        template_btn_row.addWidget(self.save_template_btn)
         template_btn_row.addWidget(self.load_template_btn)
+        template_btn_row.addWidget(self.save_template_btn)
         template_layout.addLayout(template_btn_row)
 
         export_form = QtWidgets.QFormLayout()
         self.export_start_edit = QtWidgets.QLineEdit("0")
         self.export_stop_edit = QtWidgets.QLineEdit("10")
-        self.export_fps_edit = QtWidgets.QLineEdit("20")
+        self.export_sample_fps_edit = QtWidgets.QLineEdit("20")
+        self.export_play_fps_edit = QtWidgets.QLineEdit("20")
         self.export_tmux_check = QtWidgets.QCheckBox("Export in tmux")
         self.export_btn = QtWidgets.QPushButton("Export Video")
         self.export_btn.clicked.connect(self._export_video)
-        export_form.addRow("Start", self.export_start_edit)
-        export_form.addRow("Stop", self.export_stop_edit)
-        export_form.addRow("FPS", self.export_fps_edit)
+        self.export_status_btn = QtWidgets.QPushButton("Show Tmux Progress")
+        self.export_status_btn.clicked.connect(self._show_tmux_progress)
+        export_form.addRow("Start / Stop", self._row_widget(self.export_start_edit, self.export_stop_edit))
+        export_form.addRow(
+            "Sample FPS / Play FPS",
+            self._row_widget(self.export_sample_fps_edit, self.export_play_fps_edit),
+        )
         export_form.addRow(self.export_tmux_check)
         export_form.addRow(self.export_btn)
+        export_form.addRow(self.export_status_btn)
         template_layout.addLayout(export_form)
         left_layout.insertWidget(1, template_group)
 
@@ -383,6 +452,14 @@ class ComposerWindow(QtWidgets.QMainWindow):
         color = PALETTE[self._color_index % len(PALETTE)]
         self._color_index += 1
         return color
+
+    def _row_widget(self, left: QtWidgets.QWidget, right: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        container = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(left)
+        row.addWidget(right)
+        return container
 
     def _apply_canvas_size(self):
         try:
@@ -439,7 +516,7 @@ class ComposerWindow(QtWidgets.QMainWindow):
         if name in self.sources or name in self.elements:
             self._error(f"Name '{name}' already exists.")
             return
-        params = {k: v for k, _, v in SOURCE_DEFS[src_type]["params"]}
+        params = {k: v for k, _, v, _ in _iter_params(SOURCE_DEFS[src_type]["params"])}
         self.sources[name] = {"type": src_type, "params": params}
         self.elements[name] = {
             "source": name,
@@ -453,7 +530,11 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self._name_dirty = False
         self._update_default_name(self.source_type_combo.currentText())
         self._refresh_sources_list()
-        self.sources_list.setCurrentRow(self.sources_list.count() - 1)
+        new_index = self._index_of_source(name)
+        if new_index >= 0:
+            self.sources_list.setCurrentRow(new_index)
+        self._load_source_params()
+        self._load_layout_fields()
         self._render_canvas()
 
     def _delete_source(self):
@@ -468,6 +549,31 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self._refresh_sources_list()
         self._clear_params()
         self._clear_layout_fields()
+        self._render_canvas()
+
+    def _rename_source(self):
+        name = self.selected_source
+        if not name:
+            return
+        new_name, ok = QtWidgets.QInputDialog.getText(self, "Rename Source", "New name:", text=name)
+        if not ok:
+            return
+        new_name = new_name.strip()
+        if not new_name:
+            self._error("Name cannot be empty.")
+            return
+        if new_name in self.sources or new_name in self.elements:
+            self._error(f"Name '{new_name}' already exists.")
+            return
+        self.sources[new_name] = self.sources.pop(name)
+        if name in self.elements:
+            self.elements[new_name] = self.elements.pop(name)
+            self.elements[new_name]["source"] = new_name
+        if self.selected_source == name:
+            self.selected_source = new_name
+        self._refresh_sources_list()
+        self._load_source_params()
+        self._load_layout_fields()
         self._render_canvas()
 
     def _refresh_sources_list(self):
@@ -513,16 +619,15 @@ class ComposerWindow(QtWidgets.QMainWindow):
         elem["y"] = y
         item = self._item_map.get(name)
         if item and (item.pos().x() != x or item.pos().y() != y):
-            item.blockSignals(True)
+            old_cb = item.on_moved
+            item.on_moved = None
             item.setPos(x, y)
-            item.blockSignals(False)
-        if self.selected_source != name:
-            self.selected_source = name
-            self.sources_list.setCurrentRow(self._index_of_source(name))
-        self.x_edit.setText(str(elem["x"]))
-        self.y_edit.setText(str(elem["y"]))
-        self.w_edit.setText(str(elem["w"]))
-        self.h_edit.setText(str(elem["h"]))
+            item.on_moved = old_cb
+        if self.selected_source == name:
+            self.x_edit.setText(str(elem["x"]))
+            self.y_edit.setText(str(elem["y"]))
+            self.w_edit.setText(str(elem["w"]))
+            self.h_edit.setText(str(elem["h"]))
 
     def _index_of_source(self, name: str) -> int:
         for i in range(self.sources_list.count()):
@@ -531,24 +636,39 @@ class ComposerWindow(QtWidgets.QMainWindow):
         return -1
 
     def _clear_params(self):
-        if self.params_apply_btn:
-            self.params_form.removeWidget(self.params_apply_btn)
         while self.params_form.rowCount() > 0:
             self.params_form.removeRow(0)
-        if self.params_apply_btn:
-            self.params_form.addRow(self.params_apply_btn)
         self.params_widgets = {}
 
+    def _rebuild_params_panel(self):
+        container = self.params_group.parent()
+        if container is None:
+            return
+        # Remove old panel
+        idx = container.layout().indexOf(self.params_group)
+        self.params_group.deleteLater()
+
+        # Create new panel
+        self.params_group = QtWidgets.QGroupBox("Source Params")
+        self.params_form = QtWidgets.QFormLayout(self.params_group)
+        self.params_widgets = {}
+        container.layout().insertWidget(idx, self.params_group)
+
     def _load_source_params(self):
-        self._clear_params()
+        self._rebuild_params_panel()
         if not self.selected_source:
             return
         src = self.sources[self.selected_source]
         src_type = src["type"]
         params = src["params"]
-        for key, ftype, default in SOURCE_DEFS[src_type]["params"]:
+        for key, ftype, default, hint in _iter_params(SOURCE_DEFS[src_type]["params"]):
+            label = QtWidgets.QLabel(key)
             edit = QtWidgets.QLineEdit(_format_value(params.get(key, default)))
-            self.params_form.insertRow(self.params_form.rowCount() - 1, key, edit)
+            if hint:
+                label.setToolTip(hint)
+                edit.setToolTip(hint)
+            edit.editingFinished.connect(self._apply_source_params)
+            self.params_form.addRow(label, edit)
             self.params_widgets[key] = edit
 
     def _apply_source_params(self):
@@ -556,7 +676,7 @@ class ComposerWindow(QtWidgets.QMainWindow):
             return
         src = self.sources[self.selected_source]
         src_type = src["type"]
-        for key, ftype, _default in SOURCE_DEFS[src_type]["params"]:
+        for key, ftype, _default, _hint in _iter_params(SOURCE_DEFS[src_type]["params"]):
             edit = self.params_widgets.get(key)
             if not edit:
                 continue
@@ -604,6 +724,16 @@ class ComposerWindow(QtWidgets.QMainWindow):
         except ValueError:
             self._error("Layout values must be integers.")
             return
+        # Auto-height for S2P_Binary in stack mode (preserve aspect)
+        src = self.sources.get(self.selected_source, {})
+        if src.get("type") in ("S2P_Binary", "VideoBinSource") and src.get("params", {}).get("stack_isometric"):
+            src_w = src["params"].get("width", w)
+            src_h = src["params"].get("height", h)
+            try:
+                h = int(round(float(w) * float(src_h) / float(src_w)))
+                self.h_edit.setText(str(h))
+            except Exception:
+                pass
         if w <= 0 or h <= 0:
             self._error("Width and height must be > 0.")
             return
@@ -635,7 +765,9 @@ class ComposerWindow(QtWidgets.QMainWindow):
             "timeline": {
                 "start": float(self.export_start_edit.text() or 0),
                 "stop": float(self.export_stop_edit.text() or 0),
-                "fps": float(self.export_fps_edit.text() or 0),
+                "fps": float(self.export_sample_fps_edit.text() or 0),
+                "sample_fps": float(self.export_sample_fps_edit.text() or 0),
+                "play_fps": float(self.export_play_fps_edit.text() or 0),
             },
             "canvas": {"size": [self.canvas_h, self.canvas_w], "bg": self.bg},
             "sources": self.sources,
@@ -670,7 +802,10 @@ class ComposerWindow(QtWidgets.QMainWindow):
         timeline = template.get("timeline", {})
         self.export_start_edit.setText(str(timeline.get("start", 0)))
         self.export_stop_edit.setText(str(timeline.get("stop", 10)))
-        self.export_fps_edit.setText(str(timeline.get("fps", 20)))
+        sample_fps = timeline.get("sample_fps", timeline.get("fps", 20))
+        play_fps = timeline.get("play_fps", timeline.get("fps", sample_fps))
+        self.export_sample_fps_edit.setText(str(sample_fps))
+        self.export_play_fps_edit.setText(str(play_fps))
 
         canvas = template.get("canvas", {})
         size = canvas.get("size", [self.canvas_h, self.canvas_w])
@@ -687,8 +822,8 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self._refresh_sources_list()
         self._render_canvas()
 
-    def _build_composer(self, exp_id: str, user_id: str, t_start: float, t_stop: float, t_fps: float, progress_cb=None):
-        timeline = Timeline(t_start, t_stop, t_fps)
+    def _build_composer(self, exp_id: str, user_id: str, t_start: float, t_stop: float, sample_fps: float, progress_cb=None):
+        timeline = Timeline(t_start, t_stop, sample_fps)
         _animal_id, _remote, _processed_root, exp_dir_processed, _exp_dir_raw = organise_paths.find_paths(user_id, exp_id)
 
         sources = {}
@@ -708,11 +843,18 @@ class ComposerWindow(QtWidgets.QMainWindow):
                     fps=int(params["fps"]),
                 )
             elif src_type == "ReconstructionVideoSource":
-                subdir = params.get("subdir", "reconstruction")
-                video_file = params.get("video_file", "session_recons_cut.mp4")
-                timestamps_file = params.get("timestamps_file", "video_timeline.npy")
-                video_path = os.path.join(exp_dir_processed, subdir, video_file)
-                timestamps_path = os.path.join(exp_dir_processed, subdir, timestamps_file)
+                video_path = params.get("video_path")
+                timestamps_path = params.get("timestamps_path")
+                if not video_path:
+                    subdir = params.get("subdir", "reconstruction")
+                    video_file = params.get("video_file", "session_recons_cut.mp4")
+                    video_path = os.path.join(subdir, video_file)
+                if not timestamps_path:
+                    subdir = params.get("subdir", "reconstruction")
+                    timestamps_file = params.get("timestamps_file", "video_timeline.npy")
+                    timestamps_path = os.path.join(subdir, timestamps_file)
+                video_path = os.path.join(exp_dir_processed, str(video_path))
+                timestamps_path = os.path.join(exp_dir_processed, str(timestamps_path))
                 sources[name] = ReconstructionVideoSource(
                     video_path=video_path,
                     timestamps_path=timestamps_path,
@@ -787,6 +929,41 @@ class ComposerWindow(QtWidgets.QMainWindow):
                     interpolate=bool(params.get("interpolate", False)),
                     colors=list(params.get("colors", ["cyan"])),
                 )
+            elif src_type == "NumpyTraceSource":
+                np_path = str(params.get("path", ""))
+                np_path = os.path.join(exp_dir_processed, np_path)
+                sources[name] = NumpyTraceSource(
+                    path=np_path,
+                    key=str(params.get("key", "")),
+                    columns=list(params.get("columns", [])),
+                    time_window=tuple(params.get("time_window", [-5.0, 0.0])),
+                    y_range_mode=str(params.get("y_range_mode", "global")),
+                    fixed_y_range=tuple(params.get("fixed_y_range", [])) or None,
+                    y_label=str(params.get("y_label", "")),
+                    title=str(params.get("title", "")),
+                    show_y_axis=bool(params.get("show_y_axis", True)),
+                    line_width=float(params.get("line_width", 1.5)),
+                    figure_size=tuple(params.get("figure_size", [4, 2])),
+                    dpi=int(params.get("dpi", 100)),
+                    bg_color=str(params.get("bg_color", "black")),
+                    grid=bool(params.get("grid", False)),
+                    font_color=str(params.get("font_color", "white")),
+                    interpolate=bool(params.get("interpolate", False)),
+                    colors=list(params.get("colors", ["cyan"])),
+                )
+            elif src_type == "SleepScoreSource":
+                sources[name] = SleepScoreSource(
+                    exp_dir_processed=exp_dir_processed,
+                    time_window=tuple(params.get("time_window", [-5.0, 5.0])),
+                    colors=list(params.get("colors", [PALETTE[0], PALETTE[1], PALETTE[2], PALETTE[3]])),
+                    labels=list(params.get("labels", ["AW", "QW", "NREM", "REM"])),
+                    line_width=float(params.get("line_width", 3.0)),
+                    figure_size=tuple(params.get("figure_size", [4, 2])),
+                    dpi=int(params.get("dpi", 100)),
+                    bg_color=str(params.get("bg_color", "black")),
+                    font_color=str(params.get("font_color", "white")),
+                    show_y_axis=bool(params.get("show_y_axis", True)),
+                )
             else:
                 raise ValueError(f"Unsupported source type: {src_type}")
 
@@ -826,7 +1003,7 @@ class ComposerWindow(QtWidgets.QMainWindow):
         try:
             t_start = float(self.export_start_edit.text())
             t_stop = float(self.export_stop_edit.text())
-            t_fps = float(self.export_fps_edit.text())
+            t_fps = float(self.export_sample_fps_edit.text())
         except ValueError:
             self._error("Timeline values must be numeric.")
             return
@@ -868,7 +1045,8 @@ class ComposerWindow(QtWidgets.QMainWindow):
         try:
             t_start = float(self.export_start_edit.text())
             t_stop = float(self.export_stop_edit.text())
-            fps = float(self.export_fps_edit.text())
+            sample_fps = float(self.export_sample_fps_edit.text())
+            play_fps = float(self.export_play_fps_edit.text())
         except ValueError:
             self._error("Export values must be numeric.")
             return
@@ -884,46 +1062,308 @@ class ComposerWindow(QtWidgets.QMainWindow):
         out_path = self._ensure_mp4_path(out_path)
 
         if self.export_tmux_check.isChecked():
-            if not self.template_path:
-                self._error("Save a template before exporting in tmux.")
-                return
+            base_dir = os.path.join(self._tmux_base_dir, self._system_user)
+            templates_dir = os.path.join(base_dir, "templates")
+            logs_dir = os.path.join(base_dir, "logs")
+            os.makedirs(templates_dir, exist_ok=True)
+            os.makedirs(logs_dir, exist_ok=True)
+            job_id = QtCore.QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss_zzz")
+            temp_template = os.path.join(templates_dir, f"{job_id}.json")
+            log_path = os.path.join(logs_dir, f"{job_id}.log")
+
+            self._save_template_to_path(temp_template)
+
+            job = {
+                "job_id": job_id,
+                "template": temp_template,
+                "expID": exp_id,
+                "userID": user_id,
+                "start": t_start,
+                "stop": t_stop,
+                "fps": sample_fps,
+                "sample_fps": sample_fps,
+                "play_fps": play_fps,
+                "out": out_path,
+                "log_path": log_path,
+            }
+            queue_path = os.path.join(base_dir, "queue.jsonl")
+            with open(queue_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(job) + "\n")
+                f.flush()
+
+            session_name = "composer"
             cmd = (
-                f"python export_from_template.py "
-                f"--template \"{self.template_path}\" "
-                f"--expID \"{exp_id}\" --userID \"{user_id}\" "
-                f"--start {t_start} --stop {t_stop} --fps {fps} "
-                f"--out \"{out_path}\""
+                f"{sys.executable} {os.path.join(os.path.dirname(__file__), 'queue_worker.py')} "
+                f"--user {self._system_user} --base-dir {self._tmux_base_dir}"
             )
-            session_name = f"composer_export_{os.getpid()}"
-            os.system(f"tmux new-session -d -s {session_name} \"{cmd}\"")
-            QtWidgets.QMessageBox.information(self, "Export started", f"tmux session: {session_name}")
+            with open(os.path.join(base_dir, "tmux_launch.log"), "a", encoding="utf-8") as f:
+                f.write(f"LAUNCH {QtCore.QDateTime.currentDateTime().toString()} {cmd}\\n")
+            if os.system(f"tmux has-session -t {session_name} 2>/dev/null") != 0:
+                rc = os.system(f"tmux new-session -d -s {session_name} \"{cmd}\"")
+            else:
+                rc = 0
+            if rc != 0:
+                self._error("Failed to launch tmux worker. Check tmux availability and logs.")
+                return
             return
 
+        progress = QtWidgets.QProgressDialog("Exporting frames...", None, 0, 0, self)
+        progress.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        progress.show()
+
+        def update_progress(message, value, maximum):
+            progress.setLabelText(message)
+            QtWidgets.QApplication.processEvents()
+
         try:
-            composer, timeline = self._build_composer(exp_id, user_id, t_start, t_stop, fps)
+            composer, timeline = self._build_composer(
+                exp_id,
+                user_id,
+                t_start,
+                t_stop,
+                sample_fps,
+                progress_cb=update_progress,
+            )
         except Exception as e:
+            progress.close()
             self._error(str(e))
             return
 
         try:
+            progress.setLabelText("Exporting frames...")
+            progress.setMaximum(len(timeline))
+            progress.setValue(0)
             frame0 = composer.draw_composite(timeline.times[0])
             H, W = frame0.shape[:2]
-            writer = VideoWriter(out_path, fps=timeline.fps, frame_size=(W, H))
-            progress = QtWidgets.QProgressDialog("Exporting frames...", None, 0, len(timeline), self)
-            progress.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-            progress.show()
+            writer = VideoWriter(out_path, fps=play_fps, frame_size=(W, H))
+            start_time = QtCore.QElapsedTimer()
+            start_time.start()
             for i, t in enumerate(timeline):
                 frame = composer.draw_composite(t)
                 writer.write(frame)
                 progress.setValue(i + 1)
+                elapsed_ms = start_time.elapsed()
+                if elapsed_ms > 0 and i >= 0:
+                    avg_ms = elapsed_ms / (i + 1)
+                    remaining = max(0, int(round((len(timeline) - (i + 1)) * avg_ms / 1000.0)))
+                    progress.setLabelText(f"Exporting frames... ETA {remaining}s")
                 QtWidgets.QApplication.processEvents()
             writer.close()
             progress.close()
         except Exception as e:
+            progress.close()
             self._error(str(e))
 
     def _error(self, msg: str):
         QtWidgets.QMessageBox.critical(self, "Error", msg)
+
+    def _save_template_to_path(self, path: str):
+        template = {
+            "timeline": {
+                "start": float(self.export_start_edit.text() or 0),
+                "stop": float(self.export_stop_edit.text() or 0),
+                "fps": float(self.export_sample_fps_edit.text() or 0),
+                "sample_fps": float(self.export_sample_fps_edit.text() or 0),
+                "play_fps": float(self.export_play_fps_edit.text() or 0),
+            },
+            "canvas": {"size": [self.canvas_h, self.canvas_w], "bg": self.bg},
+            "sources": self.sources,
+            "elements": {
+                name: {
+                    "source": elem["source"],
+                    "x": elem["x"],
+                    "y": elem["y"],
+                    "w": elem["w"],
+                    "h": elem["h"],
+                    "color": elem.get("color", ""),
+                }
+                for name, elem in self.elements.items()
+            },
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(template, f, indent=2)
+
+    def _show_tmux_progress(self):
+        base_dir = os.path.join(self._tmux_base_dir, self._system_user)
+        logs_dir = os.path.join(base_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Tmux Exports (last 4 days)")
+        dialog.resize(600, 400)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout(container)
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        items = {}
+
+        def load_jobs():
+            now = QtCore.QDateTime.currentDateTime()
+            jobs = []
+            # Include jobs that may not have logs yet by scanning queue
+            queued_jobs = {}
+            queue_path = os.path.join(base_dir, "queue.jsonl")
+            try:
+                with open(queue_path, "r", encoding="utf-8") as f:
+                    raw_q = f.read()
+            except Exception:
+                raw_q = ""
+            if "\\n" in raw_q:
+                raw_q = raw_q.replace("\\n", "\n")
+            for line in [ln for ln in raw_q.splitlines() if ln.strip()]:
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                job_id = payload.get("job_id")
+                if not job_id:
+                    continue
+                queued_jobs[job_id] = payload
+
+            for fname in sorted(os.listdir(logs_dir), reverse=True):
+                if not fname.endswith(".log"):
+                    continue
+                path = os.path.join(logs_dir, fname)
+                mtime = QtCore.QDateTime.fromSecsSinceEpoch(int(os.path.getmtime(path)))
+                if mtime.daysTo(now) > 4:
+                    continue
+                job_id = os.path.splitext(fname)[0]
+                exp_id = ""
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        raw = f.read()
+                except Exception:
+                    raw = ""
+                if "\\n" in raw:
+                    raw = raw.replace("\\n", "\n")
+                lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                for line in lines:
+                    if line.startswith("JOB "):
+                        try:
+                            payload = json.loads(line[4:])
+                            exp_id = payload.get("expID", "")
+                        except Exception:
+                            pass
+                        break
+                jobs.append((job_id, exp_id, path))
+                if job_id in queued_jobs:
+                    del queued_jobs[job_id]
+
+            # Add queued jobs without logs yet
+            for job_id, payload in queued_jobs.items():
+                exp_id = payload.get("expID", "")
+                path = os.path.join(logs_dir, f"{job_id}.log")
+                jobs.append((job_id, exp_id, path))
+
+            existing = set(items.keys())
+            wanted = set(j[0] for j in jobs)
+
+            for job_id in list(existing - wanted):
+                row = items[job_id][2]
+                vbox.removeWidget(row)
+                row.deleteLater()
+                del items[job_id]
+
+            for job_id, exp_id, path in jobs:
+                if job_id in items:
+                    label, status, bar, row, _path = items[job_id]
+                    title = f"{job_id} ({exp_id})" if exp_id else job_id
+                    label.setText(title)
+                    continue
+                row = QtWidgets.QWidget()
+                row_layout = QtWidgets.QHBoxLayout(row)
+                title = f"{job_id} ({exp_id})" if exp_id else job_id
+                label = QtWidgets.QLabel(title)
+                status = QtWidgets.QLabel("...")
+                bar = QtWidgets.QProgressBar()
+                bar.setRange(0, 100)
+                row_layout.addWidget(label)
+                row_layout.addWidget(status)
+                row_layout.addWidget(bar)
+                vbox.addWidget(row)
+                items[job_id] = (label, status, bar, row, path)
+
+            if not items:
+                empty = QtWidgets.QLabel("No jobs in the last 4 days.")
+                vbox.addWidget(empty)
+
+        def update_status():
+            load_jobs()
+            completed = []
+            running = []
+            waiting = []
+            for job_id, (label, status, bar, row, path) in items.items():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        raw = f.read()
+                except Exception:
+                    continue
+                if "\\n" in raw:
+                    raw = raw.replace("\\n", "\n")
+                lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                if not lines:
+                    status.setText("WAITING")
+                    waiting.append(job_id)
+                    continue
+                prog = None
+                err = None
+                done = False
+                last_line = lines[-1].strip()
+                if last_line.startswith("DONE"):
+                    done = True
+                if last_line.startswith("ERROR"):
+                    err = last_line
+                for line in reversed(lines):
+                    if line.startswith("ERROR"):
+                        err = line
+                        break
+                    if line.startswith("DONE"):
+                        done = True
+                        break
+                    if line.startswith("PROGRESS"):
+                        try:
+                            prog = float(line.split()[1])
+                            break
+                        except Exception:
+                            pass
+                debug_tail = "\\n".join(lines[-5:]) if lines else ""
+                status.setToolTip(f"Last line: {last_line}\\n\\nTail:\\n{debug_tail}")
+                if err:
+                    status.setText(err)
+                    bar.setValue(0)
+                    completed.append(job_id)
+                elif done:
+                    status.setText("DONE")
+                    bar.setValue(100)
+                    completed.append(job_id)
+                else:
+                    if prog is not None:
+                        status.setText(f"RUNNING {prog:.1f}%")
+                        bar.setValue(int(prog))
+                        running.append(job_id)
+                    else:
+                        status.setText("WAITING")
+                        waiting.append(job_id)
+
+            order = waiting + running + completed
+            for job_id in order:
+                widget = items[job_id][3]
+                vbox.removeWidget(widget)
+            for job_id in order:
+                widget = items[job_id][3]
+                vbox.addWidget(widget)
+
+        load_jobs()
+        timer = QtCore.QTimer(dialog)
+        timer.setInterval(500)
+        timer.timeout.connect(update_status)
+        timer.start()
+        update_status()
+        dialog.exec()
 
     def _ensure_mp4_path(self, path: str) -> str:
         root, ext = os.path.splitext(path)

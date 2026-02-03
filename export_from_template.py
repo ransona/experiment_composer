@@ -12,6 +12,8 @@ from sources.reconstruction_video_source import ReconstructionVideoSource
 from sources.eye_source import EyeSource
 from sources.wheel_speed_source import WheelSpeedSource
 from sources.neural_trace_source import NeuralTraceSource
+from sources.numpy_trace_source import NumpyTraceSource
+from sources.sleep_score_source import SleepScoreSource
 
 
 def _build_sources(template_sources, exp_id, user_id, exp_dir_processed):
@@ -32,11 +34,26 @@ def _build_sources(template_sources, exp_id, user_id, exp_dir_processed):
                 fps=int(params["fps"]),
             )
         elif src_type == "ReconstructionVideoSource":
-            subdir = params.get("subdir", "reconstruction")
-            video_file = params.get("video_file", "session_recons_cut.mp4")
-            timestamps_file = params.get("timestamps_file", "video_timeline.npy")
-            video_path = os.path.join(exp_dir_processed, subdir, video_file)
-            timestamps_path = os.path.join(exp_dir_processed, subdir, timestamps_file)
+            video_path = params.get("video_path")
+            timestamps_path = params.get("timestamps_path")
+            if not video_path:
+                subdir = params.get("subdir", "reconstruction")
+                video_file = params.get("video_file", "session_recons_cut.mp4")
+                video_path = os.path.join(subdir, video_file)
+            if not timestamps_path:
+                subdir = params.get("subdir", "reconstruction")
+                timestamps_file = params.get("timestamps_file", "video_timeline.npy")
+                timestamps_path = os.path.join(subdir, timestamps_file)
+            video_path = (
+                video_path
+                if os.path.isabs(str(video_path))
+                else os.path.join(exp_dir_processed, str(video_path))
+            )
+            timestamps_path = (
+                timestamps_path
+                if os.path.isabs(str(timestamps_path))
+                else os.path.join(exp_dir_processed, str(timestamps_path))
+            )
             sources[name] = ReconstructionVideoSource(
                 video_path=video_path,
                 timestamps_path=timestamps_path,
@@ -111,6 +128,42 @@ def _build_sources(template_sources, exp_id, user_id, exp_dir_processed):
                 interpolate=bool(params.get("interpolate", False)),
                 colors=list(params.get("colors", ["cyan"])),
             )
+        elif src_type == "NumpyTraceSource":
+            path = str(params.get("path", ""))
+            if path and not os.path.isabs(path):
+                path = os.path.join(exp_dir_processed, path)
+            sources[name] = NumpyTraceSource(
+                path=path,
+                key=str(params.get("key", "")),
+                columns=list(params.get("columns", [])),
+                time_window=tuple(params.get("time_window", [-5.0, 0.0])),
+                y_range_mode=str(params.get("y_range_mode", "global")),
+                fixed_y_range=tuple(params.get("fixed_y_range", [])) or None,
+                y_label=str(params.get("y_label", "")),
+                title=str(params.get("title", "")),
+                show_y_axis=bool(params.get("show_y_axis", True)),
+                line_width=float(params.get("line_width", 1.5)),
+                figure_size=tuple(params.get("figure_size", [4, 2])),
+                dpi=int(params.get("dpi", 100)),
+                bg_color=str(params.get("bg_color", "black")),
+                grid=bool(params.get("grid", False)),
+                font_color=str(params.get("font_color", "white")),
+                interpolate=bool(params.get("interpolate", False)),
+                colors=list(params.get("colors", ["cyan"])),
+            )
+        elif src_type == "SleepScoreSource":
+            sources[name] = SleepScoreSource(
+                exp_dir_processed=exp_dir_processed,
+                time_window=tuple(params.get("time_window", [-5.0, 5.0])),
+                colors=list(params.get("colors", ["#E76F51", "#F4A261", "#E9C46A", "#2A9D8F"])),
+                labels=list(params.get("labels", ["AW", "QW", "NREM", "REM"])),
+                line_width=float(params.get("line_width", 3.0)),
+                figure_size=tuple(params.get("figure_size", [4, 2])),
+                dpi=int(params.get("dpi", 100)),
+                bg_color=str(params.get("bg_color", "black")),
+                font_color=str(params.get("font_color", "white")),
+                show_y_axis=bool(params.get("show_y_axis", True)),
+            )
         else:
             raise ValueError(f"Unsupported source type: {src_type}")
     return sources
@@ -124,7 +177,9 @@ def main():
     parser.add_argument("--start", type=float, required=True)
     parser.add_argument("--stop", type=float, required=True)
     parser.add_argument("--fps", type=float, required=True)
+    parser.add_argument("--play-fps", type=float, default=None)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--log", default="")
     args = parser.parse_args()
 
     if os.path.splitext(args.out)[1] == "":
@@ -156,16 +211,39 @@ def main():
 
     composer = CanvasComposer(sources, layout_cfg, bg=int(canvas.get("bg", 0)))
     composer.initialize()
-    timeline = Timeline(args.start, args.stop, args.fps)
+    sample_fps = args.fps
+    play_fps = args.play_fps if args.play_fps is not None else sample_fps
+    timeline = Timeline(args.start, args.stop, sample_fps)
+
+    log_path = args.log.strip()
+    def log(msg):
+        if not log_path:
+            return
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(msg + "\\n")
 
     frame0 = composer.draw_composite(timeline.times[0])
     H, W = frame0.shape[:2]
-    writer = VideoWriter(args.out, fps=timeline.fps, frame_size=(W, H))
+    writer = VideoWriter(args.out, fps=play_fps, frame_size=(W, H))
 
-    for t in timeline:
-        frame = composer.draw_composite(t)
-        writer.write(frame)
+    total = len(timeline)
+    try:
+        from tqdm import tqdm  # type: ignore
+        for i, t in tqdm(list(enumerate(timeline)), total=total, unit="frame"):
+            frame = composer.draw_composite(t)
+            writer.write(frame)
+            if total > 0:
+                pct = (i + 1) / total * 100.0
+                log(f"PROGRESS {pct:.2f}")
+    except Exception:
+        for i, t in enumerate(timeline):
+            frame = composer.draw_composite(t)
+            writer.write(frame)
+            if total > 0:
+                pct = (i + 1) / total * 100.0
+                log(f"PROGRESS {pct:.2f}")
     writer.close()
+    log("DONE")
 
 
 if __name__ == "__main__":

@@ -58,8 +58,9 @@ class EyeSource(DataSource):
             raise ValueError("timestamps must be non-decreasing.")
         self.timestamps = ts.astype(np.float64, copy=False)
 
-        # ---- DLC overlays (kept as you specified earlier) ----
-        self.dlc_path = os.path.join(exp_dir_processed, "recordings", "dlcEyeRight.pickle")
+        # ---- DLC overlays ----
+        dlc_suffix = "Right" if eye_norm == "right" else "Left"
+        self.dlc_path = os.path.join(exp_dir_processed, "recordings", f"dlcEye{dlc_suffix}.pickle")
         if os.path.exists(self.dlc_path):
             with open(self.dlc_path, "rb") as f:
                 self.dlc = pickle.load(f)
