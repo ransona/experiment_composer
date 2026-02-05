@@ -11,6 +11,8 @@ class NumpyTraceSource(DataSource):
     """
     NumpyTraceSource — loads a 2D array where col0 = time and cols1..N are signals.
     Supports .npy or .npz (optional key).
+
+    If columns is provided, it refers to original file column indices (so 0 is time).
     """
 
     def __init__(
@@ -62,19 +64,19 @@ class NumpyTraceSource(DataSource):
 
         if columns:
             cols = [int(c) for c in columns]
-            y_sel = y[:, cols]
+            y_sel = np.asarray(arr[:, cols])
         else:
             y_sel = y
 
-        if y_sel.ndim == 2:
-            y_trace = np.nanmean(y_sel, axis=1)
+        if y_sel.ndim == 1:
+            y_traces = [y_sel]
         else:
-            y_trace = y_sel
+            y_traces = [y_sel[:, i] for i in range(y_sel.shape[1])]
 
         self._plotter = LinePlotSource(
             config={},
             time_vector=t,
-            y_values=[y_trace],
+            y_values=y_traces,
             colors=colors or ["cyan"],
             title=title,
             y_label=y_label,

@@ -128,7 +128,7 @@ SOURCE_DEFS = {
         "params": [
             ("path", "str", "", "Relative to exp processed dir"),
             ("key", "str", "", "For .npz: array name to load (blank = first)"),
-            ("columns", "list[int]", []),
+            ("columns", "list[int]", [1], "File column indices to plot (0 = time)"),
             ("time_window", "tuple[float]", [-5.0, 0.0]),
             ("y_range_mode", "str", "global", "global|local|fixed"),
             ("fixed_y_range", "tuple[float]", []),
