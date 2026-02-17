@@ -1051,7 +1051,11 @@ class ComposerWindow(QtWidgets.QMainWindow):
             self._error("Export values must be numeric.")
             return
 
-        default_dir = os.path.join(os.getcwd(), "output_videos")
+        try:
+            _animal_id, _remote, _processed_root, exp_dir_processed, _exp_dir_raw = organise_paths.find_paths(user_id, exp_id)
+            default_dir = os.path.join(exp_dir_processed, "composer")
+        except Exception:
+            default_dir = os.path.join(os.getcwd(), "output_videos")
         os.makedirs(default_dir, exist_ok=True)
         timestamp = QtCore.QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
         default_name = f"{exp_id}_{timestamp}.mp4"
