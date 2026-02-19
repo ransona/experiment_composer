@@ -1,0 +1,228 @@
+{
+  "timeline": {
+    "start": 17.0,
+    "stop": 30.0,
+    "fps": 20.0,
+    "sample_fps": 20.0,
+    "play_fps": 20.0
+  },
+  "canvas": {
+    "size": [
+      512,
+      800
+    ],
+    "bg": 0
+  },
+  "sources": {
+    "StimulusSource_1": {
+      "type": "StimulusSource",
+      "params": {
+        "bonsai_root": "D:\\bonsai_resources\\",
+        "stimulus_base_dir": "/home/adamranson/data/vid_for_decoder/",
+        "fps": 30,
+        "field_azimuth_range": [
+          -180.0,
+          180.0
+        ],
+        "field_elevation_range": [
+          -180.0,
+          180.0
+        ],
+        "output_azimuth_range": [
+          -130.0,
+          -30.0
+        ],
+        "output_elevation_range": [
+          -50.0,
+          10.0
+        ],
+        "pixels_per_degree": 2.0,
+        "background_gray": 127,
+        "output_azimuth_center": -80.0,
+        "output_azimuth_span": 60.0,
+        "output_elevation_center": -20.0,
+        "output_elevation_span": 40.0
+      }
+    },
+    "S2P_Binary_1": {
+      "type": "S2P_Binary",
+      "params": {
+        "planes": [
+          0
+        ],
+        "height": 512,
+        "width": 512,
+        "spatial_sigma": 1.0,
+        "temporal_window": 6,
+        "enable_spatial_filter": false,
+        "enable_temporal_filter": true,
+        "interpolate": true,
+        "max_frame_mismatch": 20,
+        "tile_layout": {
+          "rows": 1,
+          "cols": 1,
+          "order": [
+            0
+          ],
+          "gap": 0
+        },
+        "stack_isometric": false,
+        "stack_offset_pct": [
+          0.0,
+          0.2
+        ],
+        "stack_rot_x": 314.7,
+        "stack_rot_y": 324.6,
+        "stack_rot_z": 60.2,
+        "stack_border": false,
+        "stack_border_thickness": 2
+      }
+    },
+    "StimulusSource_2": {
+      "type": "StimulusSource",
+      "params": {
+        "bonsai_root": "D:\\bonsai_resources\\",
+        "stimulus_base_dir": "/home/adamranson/data/vid_for_decoder/",
+        "fps": 30,
+        "field_azimuth_range": [
+          -180.0,
+          180.0
+        ],
+        "field_elevation_range": [
+          -180.0,
+          180.0
+        ],
+        "output_azimuth_range": [
+          10.0,
+          110.0
+        ],
+        "output_elevation_range": [
+          -30.0,
+          30.0
+        ],
+        "pixels_per_degree": 2.0,
+        "background_gray": 127,
+        "output_azimuth_center": 60.0,
+        "output_azimuth_span": 60.0,
+        "output_elevation_center": 0.0,
+        "output_elevation_span": 40.0
+      }
+    },
+    "EyeSource_1": {
+      "type": "EyeSource",
+      "params": {
+        "eye": "right",
+        "timestamps_file": "recordings/eye_frame_times.npy",
+        "crop": [
+          0.25,
+          0.2,
+          0.5,
+          0.35
+        ],
+        "plot_detected_pupil": true,
+        "plot_detected_eye": true,
+        "overlay_thickness": 2,
+        "contrast_clip_percentiles": [
+          0.0,
+          90.0
+        ]
+      }
+    },
+    "NeuralTraceSource_1": {
+      "type": "NeuralTraceSource",
+      "params": {
+        "channel": 0,
+        "signal_key": "Spikes",
+        "neuron_indices": [],
+        "time_window": [
+          -5.0,
+          0.0
+        ],
+        "y_range_mode": "global",
+        "fixed_y_range": [],
+        "y_label": "",
+        "title": "Mean population activity",
+        "show_y_axis": true,
+        "line_width": 1.5,
+        "figure_size": [
+          4,
+          2
+        ],
+        "dpi": 100,
+        "bg_color": "black",
+        "grid": false,
+        "font_color": "white",
+        "interpolate": true,
+        "colors": [
+          "cyan",
+          "magenta"
+        ]
+      }
+    },
+    "EyeSource_2": {
+      "type": "EyeSource",
+      "params": {
+        "eye": "right",
+        "timestamps_file": "recordings/eye_frame_times.npy",
+        "crop": "False",
+        "plot_detected_pupil": true,
+        "plot_detected_eye": true,
+        "overlay_thickness": 2,
+        "contrast_clip_percentiles": [
+          0.0,
+          90.0
+        ]
+      }
+    }
+  },
+  "elements": {
+    "StimulusSource_1": {
+      "source": "StimulusSource_1",
+      "x": 30,
+      "y": 27,
+      "w": 200,
+      "h": 150,
+      "color": "#F4A261"
+    },
+    "S2P_Binary_1": {
+      "source": "S2P_Binary_1",
+      "x": 41,
+      "y": 194,
+      "w": 400,
+      "h": 300,
+      "color": "#E9C46A"
+    },
+    "StimulusSource_2": {
+      "source": "StimulusSource_2",
+      "x": 250,
+      "y": 28,
+      "w": 200,
+      "h": 150,
+      "color": "#2A9D8F"
+    },
+    "EyeSource_1": {
+      "source": "EyeSource_1",
+      "x": 461,
+      "y": 304,
+      "w": 110,
+      "h": 80,
+      "color": "#E76F51"
+    },
+    "NeuralTraceSource_1": {
+      "source": "NeuralTraceSource_1",
+      "x": 461,
+      "y": 38,
+      "w": 300,
+      "h": 200,
+      "color": "#E76F51"
+    },
+    "EyeSource_2": {
+      "source": "EyeSource_2",
+      "x": 589,
+      "y": 291,
+      "w": 175,
+      "h": 120,
+      "color": "#F4A261"
+    }
+  }
+}

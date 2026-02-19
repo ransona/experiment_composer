@@ -66,6 +66,7 @@ class VideoBinSource(DataSource):
         self.stack_depth = float(c.get("stack_depth", 10.0))
         self.stack_border = bool(c.get("stack_border", False))
         self.stack_border_thickness = int(c.get("stack_border_thickness", 2))
+        self.max_frame_mismatch = int(c.get("max_frame_mismatch", 4))
 
         # Filtering control
         self.filter_opts = {
@@ -176,12 +177,16 @@ class VideoBinSource(DataSource):
         diff = n_frames - len(self.frame_times)
         if diff == 0:
             print(f"[OK] Frames in .bin match Timeline pulses ({n_frames} each).")
-        elif abs(diff) < 5:
+        elif abs(diff) <= self.max_frame_mismatch:
             print(f"[Warn] Minor mismatch: bin={n_frames}, Timeline={len(self.frame_times)} (Δ={diff})")
             n_frames = min(n_frames, len(self.frame_times))
             self.frame_times = self.frame_times[:n_frames]
         else:
-            raise ValueError(f"Frame count mismatch too large: bin={n_frames}, Timeline={len(self.frame_times)} (Δ={diff})")
+            raise ValueError(
+                "Frame count mismatch too large: "
+                f"bin={n_frames}, Timeline={len(self.frame_times)} (Δ={diff}, "
+                f"max allowed={self.max_frame_mismatch})"
+            )
 
         # --- Per-plane autoscaling with caching ---
         self.vmin = []

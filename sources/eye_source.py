@@ -30,7 +30,7 @@ class EyeSource(DataSource):
         eye: str,                         # 'right' or 'left'
         timestamps_path: str,             # REQUIRED: 1D npy (timeline time per frame)
         *,
-        crop: Union[Sequence[int], bool] = False,  # (x,y,w,h) | True (interactive) | False
+        crop: Union[Sequence[float], bool] = False,  # (x,y,w,h) px OR normalized if all in [0,1]
         plot_detected_pupil: bool = False,
         plot_detected_eye: bool = False,
         overlay_thickness: int = 2,
@@ -185,7 +185,15 @@ class EyeSource(DataSource):
         H, W = first_frame.shape[:2]
 
         if isinstance(self._requested_crop, (list, tuple)) and len(self._requested_crop) == 4:
-            x, y, w, h = map(int, self._requested_crop)
+            vals = [float(v) for v in self._requested_crop]
+            is_normalized = all(0.0 <= v <= 1.0 for v in vals)
+            if is_normalized:
+                x = int(round(vals[0] * W))
+                y = int(round(vals[1] * H))
+                w = int(round(vals[2] * W))
+                h = int(round(vals[3] * H))
+            else:
+                x, y, w, h = map(int, vals)
             x = max(0, min(x, W - 1))
             y = max(0, min(y, H - 1))
             w = max(0, min(w, W - x))

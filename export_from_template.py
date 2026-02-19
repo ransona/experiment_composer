@@ -8,6 +8,7 @@ from core.timeline import Timeline
 from core.writer import VideoWriter
 from sources.video_bin_source import VideoBinSource
 from sources.stimulus_video_source import StimulusVideoSource
+from sources.stimulus_source import StimulusSource
 from sources.reconstruction_video_source import ReconstructionVideoSource
 from sources.eye_source import EyeSource
 from sources.wheel_speed_source import WheelSpeedSource
@@ -32,6 +33,26 @@ def _build_sources(template_sources, exp_id, user_id, exp_dir_processed):
                 bonsai_root=params["bonsai_root"],
                 stimulus_base_dir=params["stimulus_base_dir"],
                 fps=int(params["fps"]),
+            )
+        elif src_type == "StimulusSource":
+            cfg = {"user": user_id, "expID": exp_id}
+            out_az_range = params.get("output_azimuth_range")
+            out_el_range = params.get("output_elevation_range")
+            sources[name] = StimulusSource(
+                config=cfg,
+                bonsai_root=str(params.get("bonsai_root", "D:\\bonsai_resources\\")),
+                stimulus_base_dir=str(params.get("stimulus_base_dir", "/home/adamranson/data/vid_for_decoder/")),
+                fps=int(params.get("fps", 30)),
+                field_azimuth_range=tuple(params.get("field_azimuth_range", [-180.0, 180.0])),
+                field_elevation_range=tuple(params.get("field_elevation_range", [-180.0, 180.0])),
+                output_azimuth_center=float(params.get("output_azimuth_center", 0.0)),
+                output_azimuth_span=float(params.get("output_azimuth_span", 360.0)),
+                output_elevation_center=float(params.get("output_elevation_center", 0.0)),
+                output_elevation_span=float(params.get("output_elevation_span", 360.0)),
+                output_azimuth_range=tuple(out_az_range) if out_az_range else None,
+                output_elevation_range=tuple(out_el_range) if out_el_range else None,
+                pixels_per_degree=float(params.get("pixels_per_degree", 2.0)),
+                background_gray=int(params.get("background_gray", 127)),
             )
         elif src_type == "ReconstructionVideoSource":
             video_path = params.get("video_path")

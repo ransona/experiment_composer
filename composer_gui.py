@@ -13,6 +13,7 @@ from core.timeline import Timeline
 from core.writer import VideoWriter
 from sources.video_bin_source import VideoBinSource
 from sources.stimulus_video_source import StimulusVideoSource
+from sources.stimulus_source import StimulusSource
 from sources.reconstruction_video_source import ReconstructionVideoSource
 from sources.eye_source import EyeSource
 from sources.wheel_speed_source import WheelSpeedSource
@@ -44,6 +45,7 @@ SOURCE_DEFS = {
             ("enable_spatial_filter", "bool", False),
             ("enable_temporal_filter", "bool", True),
             ("interpolate", "bool", True),
+            ("max_frame_mismatch", "int", 4, "Allowed |bin frames - timeline frames| before error"),
             ("tile_layout", "dict", {"rows": 2, "cols": 2, "order": [0, 1, 2, 3], "gap": 4}),
             ("stack_isometric", "bool", False),
             ("stack_offset_pct", "tuple[float]", [0.0, 0.2], "dx,dy as % of plane width; negative dy moves up"),
@@ -59,6 +61,21 @@ SOURCE_DEFS = {
             ("bonsai_root", "str", "D:\\bonsai_resources\\"),
             ("stimulus_base_dir", "str", "/home/adamranson/data/vid_for_decoder/"),
             ("fps", "int", 30),
+        ],
+    },
+    "StimulusSource": {
+        "params": [
+            ("bonsai_root", "str", "D:\\bonsai_resources\\"),
+            ("stimulus_base_dir", "str", "/home/adamranson/data/vid_for_decoder/"),
+            ("fps", "int", 30),
+            ("field_azimuth_range", "tuple[float]", [-180.0, 180.0]),
+            ("field_elevation_range", "tuple[float]", [-180.0, 180.0]),
+            ("output_azimuth_center", "float", 0.0),
+            ("output_azimuth_span", "float", 360.0),
+            ("output_elevation_center", "float", 0.0),
+            ("output_elevation_span", "float", 360.0),
+            ("pixels_per_degree", "float", 2.0),
+            ("background_gray", "int", 127),
         ],
     },
     "ReconstructionVideoSource": {
@@ -236,7 +253,7 @@ def _parse_value(value: str, ftype: str):
         try:
             parsed = json.loads(v)
             if isinstance(parsed, list) and len(parsed) == 4:
-                return [int(x) for x in parsed]
+                return [float(x) for x in parsed]
         except Exception:
             pass
         return _parse_bool(v)
@@ -783,7 +800,14 @@ class ComposerWindow(QtWidgets.QMainWindow):
                 for name, elem in self.elements.items()
             },
         }
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Template", "", "JSON (*.json)")
+        default_templates_dir = os.path.join(os.getcwd(), "templates")
+        os.makedirs(default_templates_dir, exist_ok=True)
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Template",
+            default_templates_dir,
+            "JSON (*.json)",
+        )
         if not path:
             return
         with open(path, "w", encoding="utf-8") as f:
@@ -791,7 +815,14 @@ class ComposerWindow(QtWidgets.QMainWindow):
         self.template_path = path
 
     def _load_template(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load Template", "", "JSON (*.json)")
+        default_templates_dir = os.path.join(os.getcwd(), "templates")
+        os.makedirs(default_templates_dir, exist_ok=True)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Template",
+            default_templates_dir,
+            "JSON (*.json)",
+        )
         if not path:
             return
         self._load_template_file(path)
@@ -841,6 +872,26 @@ class ComposerWindow(QtWidgets.QMainWindow):
                     bonsai_root=params["bonsai_root"],
                     stimulus_base_dir=params["stimulus_base_dir"],
                     fps=int(params["fps"]),
+                )
+            elif src_type == "StimulusSource":
+                cfg = {"user": user_id, "expID": exp_id}
+                out_az_range = params.get("output_azimuth_range")
+                out_el_range = params.get("output_elevation_range")
+                sources[name] = StimulusSource(
+                    config=cfg,
+                    bonsai_root=str(params.get("bonsai_root", "D:\\bonsai_resources\\")),
+                    stimulus_base_dir=str(params.get("stimulus_base_dir", "/home/adamranson/data/vid_for_decoder/")),
+                    fps=int(params.get("fps", 30)),
+                    field_azimuth_range=tuple(params.get("field_azimuth_range", [-180.0, 180.0])),
+                    field_elevation_range=tuple(params.get("field_elevation_range", [-180.0, 180.0])),
+                    output_azimuth_center=float(params.get("output_azimuth_center", 0.0)),
+                    output_azimuth_span=float(params.get("output_azimuth_span", 360.0)),
+                    output_elevation_center=float(params.get("output_elevation_center", 0.0)),
+                    output_elevation_span=float(params.get("output_elevation_span", 360.0)),
+                    output_azimuth_range=tuple(out_az_range) if out_az_range else None,
+                    output_elevation_range=tuple(out_el_range) if out_el_range else None,
+                    pixels_per_degree=float(params.get("pixels_per_degree", 2.0)),
+                    background_gray=int(params.get("background_gray", 127)),
                 )
             elif src_type == "ReconstructionVideoSource":
                 video_path = params.get("video_path")
