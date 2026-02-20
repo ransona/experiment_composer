@@ -20,6 +20,7 @@ class StimulusSource(DataSource):
     Spatial units are in visual degrees. Features are rendered to a base visual field
     canvas and then cropped to requested output FOV.
     """
+    NAS_BV_NATURAL_ROOT = "//ar-lab-nas1/dataserver/remote_repository/bv_resources/natural_video_set/"
 
     def __init__(
         self,
@@ -337,6 +338,9 @@ class StimulusSource(DataSource):
         p = str(name).strip().lower().replace("\\", "/")
         if not p:
             return ""
+        if p.startswith(self.NAS_BV_NATURAL_ROOT):
+            suffix = p[len(self.NAS_BV_NATURAL_ROOT):].lstrip("/")
+            p = os.path.join(self.stimulus_base_dir, "natural_video_set", suffix)
         if self.bonsai_root and p.startswith(self.bonsai_root):
             p = p.replace(self.bonsai_root, self.stimulus_base_dir, 1)
         elif not os.path.isabs(p):

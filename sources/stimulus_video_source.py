@@ -19,6 +19,7 @@ class StimulusVideoSource(DataSource):
     The Bonsai path root (e.g. 'D:\\bonsai_resources\\') is replaced by
     a configurable local base directory (e.g. '/home/adamranson/data/vid_for_decoder/').
     """
+    NAS_BV_NATURAL_ROOT = "//ar-lab-nas1/dataserver/remote_repository/bv_resources/natural_video_set/"
 
     def __init__(self, config: dict, bonsai_root: str, stimulus_base_dir: str, fps: int = 30):
         """
@@ -63,8 +64,7 @@ class StimulusVideoSource(DataSource):
             try:
                 onset = float(row[0])
                 duration = float(row[2])
-                bonsai_path = str(row[7]).lower().replace("\\", "/")
-                local_path = bonsai_path.replace(self.bonsai_root, self.stimulus_base_dir)
+                local_path = self._resolve_movie_path(str(row[7]))
                 self.trials_info.append((onset, duration, local_path))
             except Exception as e:
                 print(f"[StimulusVideoSource] ⚠️ Failed parsing row: {e}")
@@ -93,6 +93,15 @@ class StimulusVideoSource(DataSource):
         ])
         self._frame_cache[stim_dir] = files
         return files
+
+    def _resolve_movie_path(self, name: str) -> str:
+        p = str(name).strip().lower().replace("\\", "/")
+        if p.startswith(self.NAS_BV_NATURAL_ROOT):
+            suffix = p[len(self.NAS_BV_NATURAL_ROOT):].lstrip("/")
+            return os.path.join(self.stimulus_base_dir, "natural_video_set", suffix)
+        if self.bonsai_root and p.startswith(self.bonsai_root):
+            return p.replace(self.bonsai_root, self.stimulus_base_dir, 1)
+        return p
 
     # ----------------------------------------------------------
     def get_frame_at_time(self, timeline_time: float) -> np.ndarray:

@@ -89,6 +89,7 @@ SOURCE_DEFS = {
             ("interpolate", "bool", True),
             ("cache_size", "int", 96),
             ("overlay_edges", "bool", False),
+            ("edges_path", "str", "reconstruction/mask_edges.npy", "Relative to exp processed dir"),
         ],
     },
     "EyeSource": {
@@ -896,6 +897,7 @@ class ComposerWindow(QtWidgets.QMainWindow):
             elif src_type == "ReconstructionVideoSource":
                 video_path = params.get("video_path")
                 timestamps_path = params.get("timestamps_path")
+                edges_path = params.get("edges_path")
                 if not video_path:
                     subdir = params.get("subdir", "reconstruction")
                     video_file = params.get("video_file", "session_recons_cut.mp4")
@@ -904,8 +906,23 @@ class ComposerWindow(QtWidgets.QMainWindow):
                     subdir = params.get("subdir", "reconstruction")
                     timestamps_file = params.get("timestamps_file", "video_timeline.npy")
                     timestamps_path = os.path.join(subdir, timestamps_file)
-                video_path = os.path.join(exp_dir_processed, str(video_path))
-                timestamps_path = os.path.join(exp_dir_processed, str(timestamps_path))
+                video_path = (
+                    video_path
+                    if os.path.isabs(str(video_path))
+                    else os.path.join(exp_dir_processed, str(video_path))
+                )
+                timestamps_path = (
+                    timestamps_path
+                    if os.path.isabs(str(timestamps_path))
+                    else os.path.join(exp_dir_processed, str(timestamps_path))
+                )
+                resolved_edges_path = None
+                if edges_path:
+                    resolved_edges_path = (
+                        edges_path
+                        if os.path.isabs(str(edges_path))
+                        else os.path.join(exp_dir_processed, str(edges_path))
+                    )
                 sources[name] = ReconstructionVideoSource(
                     video_path=video_path,
                     timestamps_path=timestamps_path,
@@ -916,6 +933,7 @@ class ComposerWindow(QtWidgets.QMainWindow):
                     interpolate=bool(params.get("interpolate", False)),
                     cache_size=int(params.get("cache_size", 128)),
                     overlay_edges=bool(params.get("overlay_edges", False)),
+                    edges_path=resolved_edges_path,
                 )
             elif src_type == "EyeSource":
                 timestamps_file = params.get("timestamps_file", os.path.join("recordings", "eye_frame_times.npy"))
